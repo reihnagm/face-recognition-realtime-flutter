@@ -1,20 +1,16 @@
 
 import 'dart:io';
-import 'dart:ui';
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:flutter/services.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'package:image/image.dart' as img;
+import 'package:lottie/lottie.dart';
 
 import 'package:realtime_face_recognition/ML/Recognition.dart';
+import 'package:realtime_face_recognition/navigate_to_presence.dart';
 
-import 'ML/Recognition.dart';
-import 'ML/Recognition.dart';
-import 'ML/Recognition.dart';
-import 'ML/Recognition.dart';
 import 'ML/Recognizer.dart';
 
 
@@ -22,7 +18,7 @@ late List<CameraDescription> cameras;
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   cameras = await availableCameras();
-  runApp(MyApp());
+  runApp(const MyApp());
 }
 
 class MyApp extends StatelessWidget {
@@ -46,6 +42,8 @@ class MyHomePage extends StatefulWidget {
 class MyHomePageState extends State<MyHomePage> {
   dynamic controller;
   bool isBusy = false;
+  bool isBlinkMode = false;
+  bool isBlinkGuide = false;
 
   CameraLensDirection camDirec = CameraLensDirection.front;
 
@@ -86,6 +84,7 @@ class MyHomePageState extends State<MyHomePage> {
       });
     });
   }
+
   @override
   void dispose() {
     controller?.dispose();
@@ -109,6 +108,8 @@ class MyHomePageState extends State<MyHomePage> {
 
     image = Platform.isIOS?_convertBGRA8888ToImage(frame!) as img.Image?:_convertNV21(frame!);
     image =img.copyRotate(image!, angle: camDirec == CameraLensDirection.front?270:90);
+    
+    isBlinkMode = false;
 
     for (Face face in faces) {
       Rect faceRect = face.boundingBox;
@@ -118,31 +119,57 @@ class MyHomePageState extends State<MyHomePage> {
       Recognition recognition = recognizer.recognize(croppedFace, faceRect);
       
       if(recognition.distance > 1.0){
+      
         recognition.name = "Unknown";
+      
       } else {
-        if (face.leftEyeOpenProbability != null && face.rightEyeOpenProbability != null) {
-          if (face.leftEyeOpenProbability! < 0.3 && face.rightEyeOpenProbability! < 0.3) {
 
-            showDialog(
-              context: context,
-              builder: (_) => 
-                AlertDialog(
-                alignment: Alignment.center,
-                content: SizedBox(
-                  height: 340,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text("Present - ${recognition.name}", textAlign: TextAlign.center),
-                    ],
-                  ),
-                ),contentPadding: EdgeInsets.zero,
-              ),
-            );
+        isBlinkGuide = true;
+          
+        if (face.leftEyeOpenProbability != null && face.rightEyeOpenProbability != null) {
+          if (face.leftEyeOpenProbability! < 0.10 && face.rightEyeOpenProbability! < 0.10) {
+
+            setState(() {
+              isBlinkMode = true;
+            });
+
+            Future.delayed(const Duration(seconds: 2), () {
+
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => NavigateToPresence(
+                  username: recognition.name,
+                )),
+              );
+
+              setState(() {
+                isBlinkMode = false;
+              });
+
+            });
+            
+            // showDialog(
+            //   context: context,
+            //   builder: (_) => 
+            //     AlertDialog(
+            //     alignment: Alignment.center,
+            //     content: SizedBox(
+            //       height: 340,
+            //       child: Column(
+            //         crossAxisAlignment: CrossAxisAlignment.center,
+            //         mainAxisAlignment: MainAxisAlignment.center,
+            //         children: [
+            //           Text("Presence - ${recognition.name}", textAlign: TextAlign.center),
+            //         ],
+            //       ),
+            //     ),
+            //     contentPadding: EdgeInsets.zero,
+            //   ),
+            // );
 
           }
         }
+
       }
 
       recognitions.add(recognition);
@@ -162,43 +189,62 @@ class MyHomePageState extends State<MyHomePage> {
   }
 
   TextEditingController textEditingController = TextEditingController();
-  showFaceRegistrationDialogue(img.Image croppedFace, Recognition recognition){
+    showFaceRegistrationDialogue(img.Image croppedFace, Recognition recognition) {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text("Face Registration",textAlign: TextAlign.center),alignment: Alignment.center,
+        title: const Text("Face Registration",
+          textAlign: TextAlign.center
+        ),
+        alignment: Alignment.center,
         content: SizedBox(
-          height: 340,
+          height: 340.0,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              const SizedBox(height: 20,),
-              Image.memory(Uint8List.fromList(img.encodeBmp(croppedFace!)),width: 200,height: 200,),
+              const SizedBox(height: 20.0),
+              Image.memory(
+                Uint8List.fromList(
+                  img.encodeBmp(croppedFace)
+                ),
+                width: 200.0,
+                height: 200.0
+              ),
               SizedBox(
-                width: 200,
+                width: 200.0,
                 child: TextField(
-                    controller: textEditingController,
-                    decoration: const InputDecoration( fillColor: Colors.white, filled: true,hintText: "Enter Name")
+                  controller: textEditingController,
+                  decoration: const InputDecoration(
+                    fillColor: Colors.white, 
+                    filled: true,
+                    hintText: "Enter Name"
+                  )
                 ),
               ),
-              const SizedBox(height: 10,),
+              const SizedBox(height: 10.0),
               ElevatedButton(
-                  onPressed: () {
-                    recognizer.registerFaceInDB(textEditingController.text, recognition.embeddings);
-                    textEditingController.text = "";
-                    Navigator.pop(context);
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                      content: Text("Face Registered"),
-                    ));
-                  },style: ElevatedButton.styleFrom(backgroundColor:Colors.blue,minimumSize: const Size(200,40)),
-                  child: const Text("Register"))
+                onPressed: () {
+                  recognizer.registerFaceInDB(textEditingController.text, recognition.embeddings);
+                  textEditingController.text = "";
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                    content: Text("Face Registered"),
+                  ));
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor:Colors.blue,
+                  minimumSize: const Size(200, 40)
+                ),
+                child: const Text("Register")
+              )
             ],
           ),
-        ),contentPadding: EdgeInsets.zero,
-      ),
+        ),
+        contentPadding: EdgeInsets.zero,
+      )
     );
   }
-  static var IOS_BYTES_OFFSET = 28;
+  static var iosbytesoffset = 28;
 
    static img.Image _convertBGRA8888ToImage(CameraImage cameraImage) {
     final plane = cameraImage.planes[0];
@@ -208,7 +254,7 @@ class MyHomePageState extends State<MyHomePage> {
       height: cameraImage.height,
       bytes: plane.bytes.buffer,
       rowStride: plane.bytesPerRow,
-      bytesOffset: IOS_BYTES_OFFSET,
+      bytesOffset: iosbytesoffset,
       order: img.ChannelOrder.bgra,
     );
   }
@@ -237,25 +283,25 @@ class MyHomePageState extends State<MyHomePage> {
         int g = (y1192 - 833 * v - 400 * u);
         int b = (y1192 + 2066 * u);
 
-        if (r < 0)
+        if (r < 0) {
           r = 0;
-        else if (r > 262143) r = 262143;
-        if (g < 0)
+        } else if (r > 262143) { r = 262143; }
+        if (g < 0) {
           g = 0;
-        else if (g > 262143) g = 262143;
-        if (b < 0)
+        }
+        else if (g > 262143) { g = 262143; }
+        if (b < 0) {
           b = 0;
-        else if (b > 262143) b = 262143;
+        }
+        else if (b > 262143) { b = 262143; }
 
-        // I don't know how these r, g, b values are defined, I'm just copying what you had bellow and
-        // getting their 8-bit values.
         outImg.setPixelRgb(i, j, ((r << 6) & 0xff0000) >> 16,
-            ((g >> 2) & 0xff00) >> 8, (b >> 10) & 0xff);
+        ((g >> 2) & 0xff00) >> 8, (b >> 10) & 0xff);
       }
     }
     return outImg;
   }
- // TODO method to convert CameraImage to Image
+
   img.Image convertYUV420ToImage(CameraImage cameraImage) {
     final width = cameraImage.width;
     final height = cameraImage.height;
@@ -268,9 +314,7 @@ class MyHomePageState extends State<MyHomePage> {
 
     for (var w = 0; w < width; w++) {
       for (var h = 0; h < height; h++) {
-        final uvIndex =
-            uvPixelStride * (w / 2).floor() + uvRowStride * (h / 2).floor();
-        final index = h * width + w;
+        final uvIndex = uvPixelStride * (w / 2).floor() + uvRowStride * (h / 2).floor();
         final yIndex = h * yRowStride + w;
 
         final y = cameraImage.planes[0].bytes[yIndex];
@@ -307,7 +351,6 @@ class MyHomePageState extends State<MyHomePage> {
     DeviceOrientation.landscapeRight: 270,
   };
 
-  //TODO convert CameraImage to InputImage
   InputImage? getInputImage() {
     final camera =
     camDirec == CameraLensDirection.front ? cameras[1] : cameras[0];
@@ -353,10 +396,14 @@ class MyHomePageState extends State<MyHomePage> {
 
 
   Widget buildResult() {
-    if (_scanResults == null ||
-        controller == null ||
-        !controller.value.isInitialized) {
-      return const Center(child: Text('Camera is not initialized'));
+    if (_scanResults == null || controller == null || !controller.value.isInitialized) {
+      return const Center(
+        child: Text('Camera is not initialized',
+          style: TextStyle(
+            color: Colors.white
+          ),
+        )
+      );
     }
     final Size imageSize = Size(
       controller.value.previewSize!.height,
@@ -368,8 +415,8 @@ class MyHomePageState extends State<MyHomePage> {
     );
   }
 
-  //TODO toggle camera direction
-  void _toggleCameraDirection() async {
+  void toggleCameraDirection() async {
+
     if (camDirec == CameraLensDirection.back) {
       camDirec = CameraLensDirection.front;
       description = cameras[1];
@@ -391,7 +438,6 @@ class MyHomePageState extends State<MyHomePage> {
     size = MediaQuery.of(context).size;
     if (controller != null) {
 
-      //TODO View for displaying the live camera footage
       stackChildren.add(
         Positioned(
           top: 0.0,
@@ -409,53 +455,40 @@ class MyHomePageState extends State<MyHomePage> {
         ),
       );
 
-      //TODO View for displaying rectangles around detected aces
       stackChildren.add(
         Positioned(
-            top: 0.0,
-            left: 0.0,
-            width: size.width,
-            height: size.height,
-            child: buildResult()),
+          top: 0.0,
+          left: 0.0,
+          width: size.width,
+          height: size.height,
+          child: buildResult()
+        ),
       );
     }
 
-    //TODO View for displaying the bar to switch camera direction or for registering faces
     stackChildren.add(Positioned(
       top: size.height - 140,
       left: 0,
       width: size.width,
       height: 80,
       child: Card(
-        margin: const EdgeInsets.only(left: 20, right: 20),
-        color: Colors.blue,
+        margin: const EdgeInsets.only(
+          left: 20.0, 
+          right: 20.0
+        ),
+        color: Colors.white,
         child: Center(
-          child: Container(
-            child: Column(
+          child:  Column(
               mainAxisAlignment: MainAxisAlignment.center,
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    // IconButton(
-                    //   icon: const Icon(
-                    //     Icons.cached,
-                    //     color: Colors.white,
-                    //   ),
-                    //   iconSize: 40,
-                    //   color: Colors.black,
-                    //   onPressed: () {
-                    //     _toggleCameraDirection();
-                    //   },
-                    // ),
-                    // Container(
-                    //   width: 30,
-                    // ),
                     IconButton(
                       icon: const Icon(
-                        Icons.face_retouching_natural,
-                        color: Colors.white,
+                        Icons.app_registration,
+                        color: Colors.black,
                       ),
                       iconSize: 40,
                       color: Colors.black,
@@ -472,16 +505,109 @@ class MyHomePageState extends State<MyHomePage> {
           ),
         ),
       ),
-    ));
+    );
 
     return SafeArea(
       child: Scaffold(
-        backgroundColor: Colors.black,
-        body: Container(
-          margin: const EdgeInsets.only(top: 0),
-          color: Colors.black,
-          child: Stack(
-            children: stackChildren,
+        backgroundColor: Colors.white,
+        body: isBlinkMode 
+        ? const Center(
+            child: SizedBox(
+              width: 80.0,
+              height: 80.0,
+              child: CircularProgressIndicator(),
+            ),
+          ) 
+        : Container(
+            margin: const EdgeInsets.only(top: 0.0),
+            color: Colors.black,
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+
+              Positioned(
+                top: 0.0,
+                left: 0.0,
+                width: size.width,
+                height: size.height,
+                child: Container(
+                  child: (controller.value.isInitialized)
+                  ? AspectRatio(
+                      aspectRatio: controller.value.aspectRatio,
+                      child: CameraPreview(controller),
+                    )
+                  : Container(),
+                ),
+              ),
+
+              Positioned(
+                top: 0.0,
+                left: 0.0,
+                width: size.width,
+                height: size.height,
+                child: buildResult()
+              ),
+
+              Positioned(
+                top: size.height - 140,
+                left: 0,
+                width: size.width,
+                height: 100.0,
+                child: Card(
+                  margin: const EdgeInsets.only(
+                    left: 20.0, 
+                    right: 20.0
+                  ),
+                  color: Colors.white,
+                  child: Padding(
+                    padding: const EdgeInsets.all(8.0),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        isBlinkGuide
+                        ? Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Text('Try blinking your eyes to indicate your presence',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 14.0
+                                ),
+                              ),
+                              LottieBuilder.asset('assets/blink-eye.json',
+                                width: 50.0,
+                                height: 50.0,
+                              )
+                            ],
+                          ) 
+                        : Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              IconButton(
+                                icon: const Icon(
+                                  Icons.app_registration,
+                                  color: Colors.black,
+                                ),
+                                iconSize: 40.0,
+                                color: Colors.black,
+                                onPressed: () {
+                                  setState(() {
+                                    register = true;
+                                  });
+                                },
+                              )
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+
+              // stackChildren
+
+            ] ,
           )
         ),
       ),
@@ -531,7 +657,7 @@ class FaceDetectorPainter extends CustomPainter {
       
       TextPainter tp = TextPainter(
         text: span,
-        textAlign: TextAlign.left,
+        textAlign: TextAlign.center,
         textDirection: TextDirection.ltr
       );
 
