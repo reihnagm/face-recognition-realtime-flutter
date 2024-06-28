@@ -8,8 +8,8 @@ import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'package:image/image.dart' as img;
 import 'package:lottie/lottie.dart';
 
-import 'package:realtime_face_recognition/ML/Recognition.dart';
-import 'package:realtime_face_recognition/navigate_to_presence.dart';
+import 'package:face_recognition_realtime/ML/Recognition.dart';
+import 'package:face_recognition_realtime/navigate_to_presence.dart';
 
 import 'ML/Recognizer.dart';
 
