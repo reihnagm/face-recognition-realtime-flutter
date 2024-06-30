@@ -1,4 +1,5 @@
 import 'dart:math';
+import 'package:intl/intl.dart';
 import 'dart:typed_data';
 import 'package:flutter/cupertino.dart';
 import 'package:image/image.dart' as img;
@@ -8,19 +9,24 @@ import 'Recognition.dart';
 
 class Recognizer {
   late Interpreter interpreter;
-  late InterpreterOptions _interpreterOptions;
+  late InterpreterOptions interpreterOptions;
+  
   static const int WIDTH = 112;
   static const int HEIGHT = 112;
+
   final dbHelper = DatabaseHelper();
+
   Map<String, Recognition> registered = {};
+  
   String get modelName => 'assets/mobile_face_net.tflite';
 
   Recognizer({int? numThreads}) {
-    _interpreterOptions = InterpreterOptions();
+    interpreterOptions = InterpreterOptions();
 
     if (numThreads != null) {
-      _interpreterOptions.threads = numThreads;
+      interpreterOptions.threads = numThreads;
     }
+
     loadModel();
     initDB();
   }
@@ -32,27 +38,43 @@ class Recognizer {
 
   void loadRegisteredFaces() async {
     registered.clear();
+    
     final allRows = await dbHelper.queryAllRows();
+
     for (final row in allRows) {
       String name = row[DatabaseHelper.columnName];
       List<double> embd = row[DatabaseHelper.columnEmbedding].split(',').map((e) => double.parse(e)).toList().cast<double>();
-      Recognition recognition = Recognition(row[DatabaseHelper.columnName], Rect.zero, embd, 0);
+      Recognition recognition = Recognition(
+        row[DatabaseHelper.columnName], 
+        row[DatabaseHelper.columnCreatedAt], 
+        Rect.zero, embd, 0
+      );
+      
       registered[name] = recognition;
     }
   }
 
-  void registerFaceInDB(String name, List<double> embedding) async {
+  void registerFaceInDB(String name, String filename, List<double> embedding) async {
     Map<String, dynamic> row = {
       DatabaseHelper.columnName: name,
-      DatabaseHelper.columnEmbedding: embedding.join(",")
+      DatabaseHelper.columnPic: filename,
+      DatabaseHelper.columnEmbedding: embedding.join(","),
+      DatabaseHelper.columnPresenceDate: DateFormat('yyyy-MM-dd').format(DateTime.now().toLocal()),
+      DatabaseHelper.columnIsLoggedIn: true.toString(),
+      DatabaseHelper.columnCreatedAt: DateFormat('yyyy-MM-dd hh:mm').format(DateTime.now().toLocal()),
     };
+    
     await dbHelper.insert(row);
+
     loadRegisteredFaces();
   }
 
   Future<void> loadModel() async {
     try {
-      interpreter = await Interpreter.fromAsset(modelName, options: _interpreterOptions);
+      interpreter = await Interpreter.fromAsset(
+        modelName, 
+        options: interpreterOptions
+      );
     } catch (e) {
       debugPrint('Unable to create interpreter, Caught Exception: ${e.toString()}');
     }
@@ -88,17 +110,19 @@ class Recognizer {
 
     Pair pair = findNearest(outputArray);
 
-    return Recognition(pair.name, location, outputArray, pair.distance);
+    return Recognition(pair.name, pair.createdAt, location, outputArray, pair.distance);
   }
 
   Pair findNearest(List<double> emb) {
-    Pair pair = Pair("Unknown", double.infinity);
+    Pair pair = Pair("Unknown", "", double.infinity);
 
     double inputNorm = sqrt(emb.fold(0, (sum, element) => sum + element * element));
     List<double> normalizedEmb = emb.map((e) => e / inputNorm).toList();
 
     for (var item in registered.entries) {
       final String name = item.key;
+      final String createdAt = item.value.createdAt;
+      
       List<double> knownEmb = item.value.embeddings;
 
       // Normalize registered embedding
@@ -115,6 +139,7 @@ class Recognizer {
       if (distance < pair.distance) {
         pair.distance = distance;
         pair.name = name;
+        pair.createdAt = createdAt;
       }
     }
     return pair;
@@ -127,6 +152,7 @@ class Recognizer {
 
 class Pair {
   String name;
+  String createdAt;
   double distance;
-  Pair(this.name, this.distance);
+  Pair(this.name, this.createdAt, this.distance);
 }

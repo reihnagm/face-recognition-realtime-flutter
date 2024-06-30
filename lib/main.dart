@@ -1,18 +1,22 @@
 
 import 'dart:io';
+import 'dart:ui' as ui;
+import 'package:face_recognition_realtime/DB/DatabaseHelper.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:flutter/services.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'package:image/image.dart' as img;
+import 'package:intl/intl.dart';
 import 'package:lottie/lottie.dart';
 
 import 'package:face_recognition_realtime/ML/Recognition.dart';
 import 'package:face_recognition_realtime/navigate_to_presence.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import 'ML/Recognizer.dart';
-
 
 late List<CameraDescription> cameras;
 Future<void> main() async {
@@ -21,38 +25,194 @@ Future<void> main() async {
   runApp(const MyApp());
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
 
   @override
+  State<MyApp> createState() => MyAppState();
+}
+
+class MyAppState extends State<MyApp>  with WidgetsBindingObserver {
+  late DatabaseHelper db;
+
+  bool isPresenceToday = false;
+
+  img.Image? image;
+  String? username;
+  String? createdAt;
+
+  bool loading = true;
+
+  @override 
+  void initState() {
+    super.initState();
+
+    WidgetsBinding.instance.addObserver(this);
+
+    if(!mounted) return;
+      db = DatabaseHelper();
+    
+    getData();
+  }
+
+  @override 
+  void dispose() {
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+
+    setState(() {
+      if (state == AppLifecycleState.resumed) {
+
+        // Permission.camera.request().then((value) async {
+        // if(value != PermissionStatus.granted) {
+        //     openAppSettings();
+        //   }
+        // });
+
+        Permission.manageExternalStorage.request().then((value) async {
+          if(value == PermissionStatus.denied || value == PermissionStatus.permanentlyDenied) {
+            await Permission.manageExternalStorage.request();
+          }
+        });
+
+        debugPrint("///Resumed///");
+      } else if (state == AppLifecycleState.inactive) {
+        debugPrint("///Inactive///");
+      } else if (state == AppLifecycleState.paused) {
+        debugPrint("///Paused///");
+      } else if (state == AppLifecycleState.detached) {
+        debugPrint("///Detached///");
+      } else if (state == AppLifecycleState.hidden) {
+        debugPrint("///Hidden///");
+      }
+    });
+  }
+
+  Future<void> getData() async {
+
+    // await Permission.camera.request().then((value) async {
+    //   if(value == PermissionStatus.granted) {
+    //     openAppSettings();
+    //   }
+    // });
+
+    await Permission.manageExternalStorage.request().then((value) async {
+      if(value == PermissionStatus.denied || value == PermissionStatus.permanentlyDenied) {
+        await Permission.manageExternalStorage.request();
+      }
+    });
+
+    await db.init();
+
+    Future.delayed(const Duration(seconds: 1), () async {
+      List data = await db.queryAllRows();
+
+      if(data.isNotEmpty) {
+
+        String presenceDate = data.first['presence_date'];
+        
+        String getUsername = data.first['name'];
+        String getPicture = data.first['picture'];
+        String getCreatedAt = data.first['picture'];
+
+        Directory directory = Directory(""); 
+    
+        if (Platform.isAndroid) { 
+          directory = Directory("/storage/emulated/0/Download"); 
+        } else { 
+          directory = await getApplicationDocumentsDirectory(); 
+        }
+      
+        final exPath = directory.path;
+
+        final file = File('$exPath/$getPicture');
+
+        final imageBytes = await file.readAsBytes();
+
+        final getImage = img.decodeImage(imageBytes);
+
+        username = getUsername;
+        image = getImage;
+        createdAt = getCreatedAt;
+
+        String currDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
+
+        if(presenceDate == currDate) {
+
+          setState(() {
+            isPresenceToday = true;
+          });
+
+        } else {
+
+          setState(() {
+            isPresenceToday = false;
+          });
+
+        }
+
+      }
+
+    });
+
+    Future.delayed(const Duration(seconds: 1), () async {
+      setState(() {
+        loading = false;
+      });
+    });
+
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return const MaterialApp(
+    return MaterialApp(
       debugShowCheckedModeBanner: false,
-      home: MyHomePage(
-    ));
+      home: loading 
+      ? const Center(
+          child: CircularProgressIndicator(),
+        )  
+      : isPresenceToday 
+      ? NavigateToPresence(
+          image: image, 
+          username: username.toString(), 
+          createdAt: createdAt.toString()
+        ) 
+      : const MyHomePage()
+    );
   }
 }
 
 class MyHomePage extends StatefulWidget {
   const MyHomePage({Key? key}) : super(key: key);
+
   @override
   MyHomePageState createState() => MyHomePageState();
 }
 
 class MyHomePageState extends State<MyHomePage> {
-  dynamic controller;
+  
+  late CameraController controller;
+
   bool isBusy = false;
   bool isBlinkMode = false;
   bool isBlinkGuide = false;
+  bool register = false;
+
+  img.Image? image;
+  
+  List<Recognition> scanResults = [];
+  CameraImage? frame;
 
   CameraLensDirection camDirec = CameraLensDirection.front;
 
   late Size size;
   late CameraDescription description = cameras[1];
   late List<Recognition> recognitions = [];
-
   late FaceDetector faceDetector;
-
   late Recognizer recognizer;
 
   @override
@@ -66,33 +226,37 @@ class MyHomePageState extends State<MyHomePage> {
       enableClassification: true,
       performanceMode: FaceDetectorMode.accurate
     );
+    
     faceDetector = FaceDetector(options: options);
+    
     recognizer = Recognizer();
+    
     initializeCamera();
   }
 
-  initializeCamera() async {
+  Future<void> initializeCamera() async {
     controller = CameraController(description, ResolutionPreset.medium,imageFormatGroup: Platform.isAndroid
     ? ImageFormatGroup.nv21 
-        : ImageFormatGroup.bgra8888,enableAudio: false); 
-    await controller.initialize().then((_) {
-      if (!mounted) {
-        return;
+    : ImageFormatGroup.bgra8888,enableAudio: false); 
+
+    await controller.initialize();
+      
+    controller.startImageStream((image) {
+      if (!isBusy) {
+        isBusy = true; 
+        frame = image;
+        doFaceDetectionOnFrame();
       }
-      controller.startImageStream((image) => {
-        if (!isBusy) {isBusy = true, frame = image, doFaceDetectionOnFrame()}
-      });
     });
+
   }
 
   @override
   void dispose() {
-    controller?.dispose();
+    controller.dispose();
     super.dispose();
   }
 
-  dynamic _scanResults;
-  CameraImage? frame;
   doFaceDetectionOnFrame() async {
     InputImage? inputImage = getInputImage();
     List<Face> faces = await faceDetector.processImage(inputImage!);
@@ -100,17 +264,16 @@ class MyHomePageState extends State<MyHomePage> {
     performFaceRecognition(faces);
   }
 
-  img.Image? image;
-  bool register = false;
   performFaceRecognition(List<Face> faces) async {
     recognitions = [];
-    _scanResults = [];
+
+    setState(() {
+      isBlinkGuide = false;
+    });
 
     image = Platform.isIOS?_convertBGRA8888ToImage(frame!) as img.Image?:_convertNV21(frame!);
     image =img.copyRotate(image!, angle: camDirec == CameraLensDirection.front?270:90);
     
-    isBlinkMode = false;
-
     for (Face face in faces) {
       Rect faceRect = face.boundingBox;
 
@@ -121,51 +284,47 @@ class MyHomePageState extends State<MyHomePage> {
       if(recognition.distance > 1.0){
       
         recognition.name = "Unknown";
-      
+
       } else {
 
-        isBlinkGuide = true;
+        setState(() {
+          isBlinkGuide = true;
+        });
           
         if (face.leftEyeOpenProbability != null && face.rightEyeOpenProbability != null) {
-          if (face.leftEyeOpenProbability! < 0.10 && face.rightEyeOpenProbability! < 0.10) {
-
-            setState(() {
-              isBlinkMode = true;
-            });
-
-            Future.delayed(const Duration(seconds: 2), () {
-
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (context) => NavigateToPresence(
-                  username: recognition.name,
-                )),
-              );
-
-              setState(() {
-                isBlinkMode = false;
-              });
-
-            });
+          if (face.leftEyeOpenProbability! < 0.15 && face.rightEyeOpenProbability! < 0.15) {
             
-            // showDialog(
-            //   context: context,
-            //   builder: (_) => 
-            //     AlertDialog(
-            //     alignment: Alignment.center,
-            //     content: SizedBox(
-            //       height: 340,
-            //       child: Column(
-            //         crossAxisAlignment: CrossAxisAlignment.center,
-            //         mainAxisAlignment: MainAxisAlignment.center,
-            //         children: [
-            //           Text("Presence - ${recognition.name}", textAlign: TextAlign.center),
-            //         ],
-            //       ),
-            //     ),
-            //     contentPadding: EdgeInsets.zero,
-            //   ),
-            // );
+            isBlinkMode = true;
+
+            Directory directory = Directory(""); 
+    
+            if (Platform.isAndroid) { 
+              directory = Directory("/storage/emulated/0/Download"); 
+            } else { 
+              directory = await getApplicationDocumentsDirectory(); 
+            }
+          
+            final exPath = directory.path;
+
+            final file = File('$exPath/${recognition.name}.png');
+
+            final imageBytes = await file.readAsBytes();
+
+            final image = img.decodeImage(imageBytes);
+
+            Future.delayed(const Duration(seconds: 1), () {
+              Navigator.of(context) .pushAndRemoveUntil(
+                MaterialPageRoute(
+                  builder: (context) {
+                    return NavigateToPresence(
+                      image: image,
+                      username: recognition.name,
+                      createdAt: recognition.createdAt
+                    );
+                  },
+                ), 
+              (Route<dynamic> route) => false);
+            });
 
           }
         }
@@ -180,69 +339,116 @@ class MyHomePageState extends State<MyHomePage> {
       }
 
     }
-
-    setState(() {
-      isBusy  = false;
-      _scanResults = recognitions;
-    });
+    
+    if(mounted) {
+      setState(() {
+        isBusy = false;
+        scanResults = recognitions;
+      });
+    }
 
   }
 
+  Future<void> saveImageToDownloads({
+    required img.Image image, 
+    required String filename
+  }) async {
+    Directory directory = Directory(""); 
+    
+    if (Platform.isAndroid) { 
+      directory = Directory("/storage/emulated/0/Download"); 
+    } else { 
+      directory = await getApplicationDocumentsDirectory(); 
+    }
+  
+    final exPath = directory.path;
+
+    final file = File('$exPath/$filename');
+
+    final imageBytes = Uint8List.fromList(img.encodePng(image));
+    
+    await file.writeAsBytes(imageBytes);
+
+    debugPrint('IMG saved to ${file.path}');
+  }
+
   TextEditingController textEditingController = TextEditingController();
-    showFaceRegistrationDialogue(img.Image croppedFace, Recognition recognition) {
+
+  showFaceRegistrationDialogue(img.Image croppedFace, Recognition recognition) {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text("Face Registration",
-          textAlign: TextAlign.center
-        ),
-        alignment: Alignment.center,
-        content: SizedBox(
-          height: 340.0,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              const SizedBox(height: 20.0),
-              Image.memory(
-                Uint8List.fromList(
-                  img.encodeBmp(croppedFace)
-                ),
-                width: 200.0,
-                height: 200.0
+      title: const Text("Face Registration",
+        textAlign: TextAlign.center
+      ),
+      alignment: Alignment.center,
+      content: SizedBox(
+        height: 340.0,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            const SizedBox(height: 20.0),
+            Image.memory(
+              Uint8List.fromList(
+                img.encodeBmp(croppedFace)
               ),
-              SizedBox(
-                width: 200.0,
-                child: TextField(
-                  controller: textEditingController,
-                  decoration: const InputDecoration(
-                    fillColor: Colors.white, 
-                    filled: true,
-                    hintText: "Enter Name"
-                  )
-                ),
+              width: 200.0,
+              height: 200.0
+            ),
+            SizedBox(
+              width: 200.0,
+              child: TextField(
+                controller: textEditingController,
+                decoration: const InputDecoration(
+                  fillColor: Colors.white, 
+                  filled: true,
+                  hintText: "Enter Name"
+                )
               ),
-              const SizedBox(height: 10.0),
-              ElevatedButton(
-                onPressed: () {
-                  recognizer.registerFaceInDB(textEditingController.text, recognition.embeddings);
-                  textEditingController.text = "";
+            ),
+            const SizedBox(height: 10.0),
+            ElevatedButton(
+              onPressed: () async {
+
+                if(textEditingController.text.isEmpty) {
+                  Future.delayed(Duration.zero, () {
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                      content: Text("Username is required"),
+                    ));
+                  });
+                  return;
+                }
+
+                String filename = "${textEditingController.text}.png";
+
+                await saveImageToDownloads(image: croppedFace, filename: filename);
+
+                recognizer.registerFaceInDB(textEditingController.text, filename, recognition.embeddings);
+
+                textEditingController.text = "";
+                
+                Future.delayed(Duration.zero, () {
                   Navigator.pop(context);
+                });
+
+                Future.delayed(Duration.zero, () {
                   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
                     content: Text("Face Registered"),
                   ));
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor:Colors.blue,
-                  minimumSize: const Size(200, 40)
-                ),
-                child: const Text("Register")
-              )
-            ],
-          ),
+                });
+                
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor:Colors.blue,
+                minimumSize: const Size(200, 40)
+              ),
+              child: const Text("Register")
+            )
+          ],
         ),
-        contentPadding: EdgeInsets.zero,
-      )
-    );
+      ),
+      contentPadding: EdgeInsets.zero,
+    ));
   }
   static var iosbytesoffset = 28;
 
@@ -357,28 +563,24 @@ class MyHomePageState extends State<MyHomePage> {
     final sensorOrientation = camera.sensorOrientation;
 
     InputImageRotation? rotation;
+    
     if (Platform.isIOS) {
       rotation = InputImageRotationValue.fromRawValue(sensorOrientation);
     } else if (Platform.isAndroid) {
-      var rotationCompensation =
-      _orientations[controller!.value.deviceOrientation];
+      var rotationCompensation = _orientations[controller.value.deviceOrientation];
       if (rotationCompensation == null) return null;
       if (camera.lensDirection == CameraLensDirection.front) {
-        // front-facing
         rotationCompensation = (sensorOrientation + rotationCompensation) % 360;
       } else {
-        // back-facing
-        rotationCompensation =
-            (sensorOrientation - rotationCompensation + 360) % 360;
+        rotationCompensation = (sensorOrientation - rotationCompensation + 360) % 360;
       }
       rotation = InputImageRotationValue.fromRawValue(rotationCompensation);
     }
+
     if (rotation == null) return null;
 
     final format = InputImageFormatValue.fromRawValue(frame!.format.raw);
-    if (format == null ||
-        (Platform.isAndroid && format != InputImageFormat.nv21) ||
-        (Platform.isIOS && format != InputImageFormat.bgra8888)) return null;
+    if (format == null || (Platform.isAndroid && format != InputImageFormat.nv21) || (Platform.isIOS && format != InputImageFormat.bgra8888)) return null;
 
     if (frame!.planes.length != 1) return null;
     final plane = frame!.planes.first;
@@ -396,7 +598,7 @@ class MyHomePageState extends State<MyHomePage> {
 
 
   Widget buildResult() {
-    if (_scanResults == null || controller == null || !controller.value.isInitialized) {
+    if (!controller.value.isInitialized) {
       return const Center(
         child: Text('Camera is not initialized',
           style: TextStyle(
@@ -405,11 +607,12 @@ class MyHomePageState extends State<MyHomePage> {
         )
       );
     }
+
     final Size imageSize = Size(
       controller.value.previewSize!.height,
       controller.value.previewSize!.width,
     );
-    CustomPainter painter = FaceDetectorPainter(imageSize, _scanResults, camDirec);
+    CustomPainter painter = FaceDetectorPainter(imageSize, scanResults, camDirec);
     return CustomPaint(
       painter: painter,
     );
@@ -434,9 +637,12 @@ class MyHomePageState extends State<MyHomePage> {
 
   @override
   Widget build(BuildContext context) {
+    
     List<Widget> stackChildren = [];
+    
     size = MediaQuery.of(context).size;
-    if (controller != null) {
+
+    if (!controller.value.isInitialized) {
 
       stackChildren.add(
         Positioned(
@@ -464,6 +670,7 @@ class MyHomePageState extends State<MyHomePage> {
           child: buildResult()
         ),
       );
+
     }
 
     stackChildren.add(Positioned(
@@ -658,7 +865,7 @@ class FaceDetectorPainter extends CustomPainter {
       TextPainter tp = TextPainter(
         text: span,
         textAlign: TextAlign.center,
-        textDirection: TextDirection.ltr
+        textDirection: ui.TextDirection.rtl
       );
 
       tp.layout();
