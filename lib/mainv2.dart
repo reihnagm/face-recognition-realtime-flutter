@@ -35,7 +35,7 @@ class MyApp extends StatefulWidget {
 class MyAppState extends State<MyApp>  with WidgetsBindingObserver {
   late DatabaseHelper db;
 
-  // bool isPresenceToday = false;
+  bool isPresenceToday = false;
 
   img.Image? image;
   String? username;
@@ -144,13 +144,13 @@ class MyAppState extends State<MyApp>  with WidgetsBindingObserver {
         if(presenceDate == currDate) {
 
           setState(() {
-            // isPresenceToday = true;
+            isPresenceToday = true;
           });
 
         } else {
 
           setState(() {
-            // isPresenceToday = false;
+            isPresenceToday = false;
           });
 
         }
@@ -545,30 +545,28 @@ Future<img.Image?> readImageFromFile(String filePath) async {
         final u = cameraImage.planes[1].bytes[uvIndex];
         final v = cameraImage.planes[2].bytes[uvIndex];
 
-        image.data!.setPixelR(w, h, yuv2rgb(y, u, v));//= yuv2rgb(y, u, v);
+        image.data!.setPixelR(w, h, yuv2rgb(y, u, v));
       }
     }
     return image;
   }
   int yuv2rgb(int y, int u, int v) {
-    // Convert yuv pixel to rgb
     var r = (y + v * 1436 / 1024 - 179).round();
     var g = (y - u * 46549 / 131072 + 44 - v * 93604 / 131072 + 91).round();
     var b = (y + u * 1814 / 1024 - 227).round();
 
-    // Clipping RGB values to be inside boundaries [ 0 , 255 ]
     r = r.clamp(0, 255);
     g = g.clamp(0, 255);
     b = b.clamp(0, 255);
 
     return 0xff000000 |
-        ((b << 16) & 0xff0000) |
-        ((g << 8) & 0xff00) |
-        (r & 0xff);
+    ((b << 16) & 0xff0000) |
+    ((g << 8) & 0xff00) |
+    (r & 0xff);
   }
 
 
-  final _orientations = {
+  final orientations = {
     DeviceOrientation.portraitUp: 0,
     DeviceOrientation.landscapeLeft: 90,
     DeviceOrientation.portraitDown: 180,
@@ -585,7 +583,7 @@ Future<img.Image?> readImageFromFile(String filePath) async {
     if (Platform.isIOS) {
       rotation = InputImageRotationValue.fromRawValue(sensorOrientation);
     } else if (Platform.isAndroid) {
-      var rotationCompensation = _orientations[controller.value.deviceOrientation];
+      var rotationCompensation = orientations[controller.value.deviceOrientation];
       if (rotationCompensation == null) return null;
       if (camera.lensDirection == CameraLensDirection.front) {
         rotationCompensation = (sensorOrientation + rotationCompensation) % 360;
@@ -629,11 +627,12 @@ Future<img.Image?> readImageFromFile(String filePath) async {
       controller.value.previewSize!.height,
       controller.value.previewSize!.width,
     );
+
     CustomPainter painter = FaceDetectorPainter(imageSize, scanResults, camDirec);
-    return CustomPaint(
-      painter: painter,
-    );
-  }
+      return CustomPaint(
+        painter: painter,
+      );
+    }
 
   void toggleCameraDirection() async {
 
@@ -760,7 +759,7 @@ Future<img.Image?> readImageFromFile(String filePath) async {
                       aspectRatio: controller.value.aspectRatio,
                       child: CameraPreview(controller),
                     )
-                  : Container(),
+                  : const SizedBox(),
                 ),
               ),
 
@@ -789,23 +788,7 @@ Future<img.Image?> readImageFromFile(String filePath) async {
                       mainAxisAlignment: MainAxisAlignment.center,
                       crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        isBlinkGuide
-                        ? Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              const Text('Try blinking your eyes to indicate your presence',
-                                style: TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 14.0
-                                ),
-                              ),
-                              LottieBuilder.asset('assets/blink-eye.json',
-                                width: 50.0,
-                                height: 50.0,
-                              )
-                            ],
-                          ) 
-                        : Row(
+                         Row(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
                               IconButton(
@@ -828,8 +811,6 @@ Future<img.Image?> readImageFromFile(String filePath) async {
                     ),
                   ),
                 ),
-
-              // stackChildren
 
             ] ,
           )
