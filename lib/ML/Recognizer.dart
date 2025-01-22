@@ -11,8 +11,8 @@ class Recognizer {
   late Interpreter interpreter;
   late InterpreterOptions interpreterOptions;
   
-  static const int WIDTH = 112;
-  static const int HEIGHT = 112;
+  static const int width = 112;
+  static const int height = 112;
 
   final dbHelper = DatabaseHelper();
 
@@ -81,12 +81,10 @@ class Recognizer {
   }
 
   List<dynamic> imageToArray(img.Image inputImage) {
-    img.Image resizedImage = img.copyResize(inputImage, width: WIDTH, height: HEIGHT);
+    img.Image resizedImage = img.copyResize(inputImage, width: width, height: height);
     List<double> flattenedList = resizedImage.getBytes().map((value) => value.toDouble()).toList();
     Float32List float32Array = Float32List.fromList(flattenedList);
     int channels = 3;
-    int height = HEIGHT;
-    int width = WIDTH;
     Float32List reshapedArray = Float32List(1 * height * width * channels);
     for (int c = 0; c < channels; c++) {
       for (int h = 0; h < height; h++) {
@@ -116,34 +114,46 @@ class Recognizer {
   Pair findNearest(List<double> emb) {
     Pair pair = Pair("Unknown", "", double.infinity);
 
-    double inputNorm = sqrt(emb.fold(0, (sum, element) => sum + element * element));
-    List<double> normalizedEmb = emb.map((e) => e / inputNorm).toList();
+    // Precompute the input embedding norm (squared norm is enough for comparison)
+    double inputSquaredNorm = emb.fold(0, (sum, element) => sum + element * element);
+    double inputNorm = sqrt(inputSquaredNorm);
 
     for (var item in registered.entries) {
       final String name = item.key;
       final String createdAt = item.value.createdAt;
-      
       List<double> knownEmb = item.value.embeddings;
 
-      // Normalize registered embedding
-      double knownNorm = sqrt(knownEmb.fold(0, (sum, element) => sum + element * element));
-      List<double> normalizedKnownEmb = knownEmb.map((e) => e / knownNorm).toList();
+      // Compute the squared norm of the known embedding only once
+      double knownSquaredNorm = knownEmb.fold(0, (sum, element) => sum + element * element);
+      double knownNorm = sqrt(knownSquaredNorm);
 
-      // Calculate weighted squared Euclidean distance
+      // Calculate the weighted squared Euclidean distance directly
       double distance = 0;
-      for (int i = 0; i < normalizedEmb.length; i++) {
-        double diff = normalizedEmb[i] - normalizedKnownEmb[i];
+      for (int i = 0; i < emb.length; i++) {
+        double diff = emb[i] - knownEmb[i];
         distance += diff * diff;
       }
 
-      if (distance < pair.distance) {
-        pair.distance = distance;
+      // Normalize the distance (if normalization is necessary)
+      double normalizedDistance = distance / (inputNorm * knownNorm);
+
+      // Update the nearest pair if this distance is smaller
+      if (normalizedDistance < pair.distance) {
+        pair.distance = normalizedDistance;
         pair.name = name;
         pair.createdAt = createdAt;
+
+        // Optional: Early exit for very small distances
+        if (normalizedDistance < 1e-6) {
+          break;
+        }
       }
     }
+
     return pair;
   }
+
+
 
   void close() {
     interpreter.close();

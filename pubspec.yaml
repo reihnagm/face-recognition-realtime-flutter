@@ -13,8 +13,8 @@ dependencies:
     sdk: flutter
 
 dependency_overrides:
-  wakelock_windows: any
-  win32: ^5.5.4
+  # wakelock_windows: any
+  # win32: ^5.5.4
 
   # C
   cupertino_icons: ^1.0.8

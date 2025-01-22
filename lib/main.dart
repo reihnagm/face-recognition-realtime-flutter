@@ -1,4 +1,5 @@
 
+import 'dart:developer';
 import 'dart:io';
 import 'dart:ui' as ui;
 import 'package:face_recognition_realtime/DB/DatabaseHelper.dart';
@@ -108,7 +109,6 @@ class MyAppState extends State<MyApp>  with WidgetsBindingObserver {
 
     await db.init();
 
-    Future.delayed(const Duration(seconds: 1), () async {
       List data = await db.queryAllRows();
 
       if(data.isNotEmpty) {
@@ -157,13 +157,10 @@ class MyAppState extends State<MyApp>  with WidgetsBindingObserver {
 
       }
 
-    });
 
-    Future.delayed(const Duration(seconds: 1), () async {
       setState(() {
         loading = false;
       });
-    });
 
   }
 
@@ -198,14 +195,15 @@ class MyHomePageState extends State<MyHomePage> {
   late CameraController controller;
 
   bool isBusy = false;
-  bool isBlinkMode = false;
-  bool isBlinkGuide = false;
   bool register = false;
 
   img.Image? image;
   
   List<Recognition> scanResults = [];
   CameraImage? frame;
+
+  int frameSkip = 60;
+  int frameCounter = 0;
 
   CameraLensDirection camDirec = CameraLensDirection.front;
 
@@ -215,46 +213,26 @@ class MyHomePageState extends State<MyHomePage> {
   late FaceDetector faceDetector;
   late Recognizer recognizer;
 
-  @override
-  void initState() {
-    super.initState();
-
-    var options = FaceDetectorOptions(
-      enableLandmarks: false,
-      enableContours: true,
-      enableTracking: true,
-      enableClassification: true,
-      performanceMode: FaceDetectorMode.accurate
-    );
-    
-    faceDetector = FaceDetector(options: options);
-    
-    recognizer = Recognizer();
-    
-    initializeCamera();
-  }
-
   Future<void> initializeCamera() async {
-    controller = CameraController(description, ResolutionPreset.medium,imageFormatGroup: Platform.isAndroid
+    controller = CameraController(
+      description,
+      ResolutionPreset.medium,
+      imageFormatGroup: Platform.isAndroid
     ? ImageFormatGroup.nv21 
-    : ImageFormatGroup.bgra8888,enableAudio: false); 
+    : ImageFormatGroup.bgra8888, 
+      enableAudio: false
+    ); 
 
     await controller.initialize();
       
     controller.startImageStream((image) {
-      if (!isBusy) {
-        isBusy = true; 
+      if (!isBusy && frameCounter % frameSkip == 0) {
+        isBusy = true;
         frame = image;
         doFaceDetectionOnFrame();
       }
+      frameCounter++;
     });
-
-  }
-
-  @override
-  void dispose() {
-    controller.dispose();
-    super.dispose();
   }
 
   Future<void> doFaceDetectionOnFrame() async {
@@ -268,12 +246,12 @@ class MyHomePageState extends State<MyHomePage> {
   Future<void> performFaceRecognition(List<Face> faces) async {
     if (frame == null) return;
 
-    recognitions = [];
-    isBlinkGuide = false;
+    img.Image baseImage = processCameraFrame();
 
-    img.Image baseImage = _processCameraFrame();
+    recognitions = [];
+
     for (Face face in faces) {
-      Recognition recognition = await _processFaceRecognition(baseImage, face);
+      Recognition recognition = await processFaceRecognition(baseImage, face);
 
       if (register) {
         showFaceRegistrationDialogue(img.copyCrop(baseImage, 
@@ -281,7 +259,8 @@ class MyHomePageState extends State<MyHomePage> {
           y: face.boundingBox.top.toInt(),
           width: face.boundingBox.width.toInt(),
           height: face.boundingBox.height.toInt()),
-          recognition);
+          recognition
+        );
         register = false;
       }
 
@@ -296,76 +275,50 @@ class MyHomePageState extends State<MyHomePage> {
     }
   }
 
-  img.Image _processCameraFrame() {
+  img.Image processCameraFrame() {
     img.Image image = Platform.isIOS 
-        ? convertBGRA8888ToImage(frame!) as img.Image 
-        : convertNV21(frame!);
+    ? convertBGRA8888ToImage(frame!) 
+    : convertNV21(frame!);
     return img.copyRotate(image, angle: camDirec == CameraLensDirection.front ? 270 : 90);
   }
 
-Future<Recognition> _processFaceRecognition(img.Image image, Face face) async {
-  Rect faceRect = face.boundingBox;
-  img.Image croppedFace = img.copyCrop(image,
+  Future<Recognition> processFaceRecognition(img.Image image, Face face) async {
+    Rect faceRect = face.boundingBox;
+
+    img.Image croppedFace = img.copyCrop(
+      image,
       x: faceRect.left.toInt(),
       y: faceRect.top.toInt(),
       width: faceRect.width.toInt(),
-      height: faceRect.height.toInt());
+      height: faceRect.height.toInt()
+    );
 
-  Recognition recognition = recognizer.recognize(croppedFace, faceRect);
+    Recognition recognition = recognizer.recognize(croppedFace, faceRect);
 
-  if (recognition.distance > 1.0) {
-    recognition.name = "Unknown";
-  } else {
-    await handleBlinkAndNavigate(face, recognition);
+    if (recognition.distance > 1.0) {
+      recognition.name = "Not Registered";
+    } else {
+      // registered
+    }
+
+    return recognition;
   }
 
-  return recognition;
-}
-
-Future<void> handleBlinkAndNavigate(Face face, Recognition recognition) async {
-  if (face.leftEyeOpenProbability != null &&
-      face.rightEyeOpenProbability != null &&
-      face.leftEyeOpenProbability! < 0.15 &&
-      face.rightEyeOpenProbability! < 0.15) {
-    isBlinkMode = true;
-
-    Directory directory = await getStorageDirectory();
-    String filePath = '${directory.path}/${recognition.name}.png';
-    img.Image? savedImage = await readImageFromFile(filePath);
-
-    if (savedImage != null) {
-      Future.delayed(const Duration(seconds: 1), () {
-        // Navigator.of(context).pushAndRemoveUntil(
-        //   MaterialPageRoute(
-        //     builder: (context) => NavigateToPresence(
-        //       image: savedImage,
-        //       username: recognition.name,
-        //       createdAt: recognition.createdAt,
-        //     ),
-        //   ),
-        //   (route) => false,
-        // );
-      });
+  Future<Directory> getStorageDirectory() async {
+    if (Platform.isAndroid) {
+      return Directory("/storage/emulated/0/Download");
+    } else {
+      return await getApplicationDocumentsDirectory();
     }
   }
-}
 
-Future<Directory> getStorageDirectory() async {
-  if (Platform.isAndroid) {
-    return Directory("/storage/emulated/0/Download");
-  } else {
-    return await getApplicationDocumentsDirectory();
+  Future<img.Image?> readImageFromFile(String filePath) async {
+    File file = File(filePath);
+    if (!file.existsSync()) return null;
+
+    final imageBytes = await file.readAsBytes();
+    return img.decodeImage(imageBytes);
   }
-}
-
-Future<img.Image?> readImageFromFile(String filePath) async {
-  File file = File(filePath);
-  if (!file.existsSync()) return null;
-
-  final imageBytes = await file.readAsBytes();
-  return img.decodeImage(imageBytes);
-}
-
 
   Future<void> saveImageToDownloads({
     required img.Image image, 
@@ -387,7 +340,7 @@ Future<img.Image?> readImageFromFile(String filePath) async {
     
     await file.writeAsBytes(imageBytes);
 
-    debugPrint('IMG saved to ${file.path}');
+    log('IMG saved to ${file.path}');
   }
 
   TextEditingController textEditingController = TextEditingController();
@@ -561,14 +514,11 @@ Future<img.Image?> readImageFromFile(String filePath) async {
     g = g.clamp(0, 255);
     b = b.clamp(0, 255);
 
-    return 0xff000000 |
-        ((b << 16) & 0xff0000) |
-        ((g << 8) & 0xff00) |
-        (r & 0xff);
+    return 0xff000000 | ((b << 16) & 0xff0000) | ((g << 8) & 0xff00) | (r & 0xff);
   }
 
 
-  final _orientations = {
+  final orientations = {
     DeviceOrientation.portraitUp: 0,
     DeviceOrientation.landscapeLeft: 90,
     DeviceOrientation.portraitDown: 180,
@@ -585,7 +535,7 @@ Future<img.Image?> readImageFromFile(String filePath) async {
     if (Platform.isIOS) {
       rotation = InputImageRotationValue.fromRawValue(sensorOrientation);
     } else if (Platform.isAndroid) {
-      var rotationCompensation = _orientations[controller.value.deviceOrientation];
+      var rotationCompensation = orientations[controller.value.deviceOrientation];
       if (rotationCompensation == null) return null;
       if (camera.lensDirection == CameraLensDirection.front) {
         rotationCompensation = (sensorOrientation + rotationCompensation) % 360;
@@ -629,7 +579,9 @@ Future<img.Image?> readImageFromFile(String filePath) async {
       controller.value.previewSize!.height,
       controller.value.previewSize!.width,
     );
+    
     CustomPainter painter = FaceDetectorPainter(imageSize, scanResults, camDirec);
+    
     return CustomPaint(
       painter: painter,
     );
@@ -645,12 +597,39 @@ Future<img.Image?> readImageFromFile(String filePath) async {
       description = cameras[0];
     }
     await controller.stopImageStream();
+
     setState(() {
       controller;
     });
 
     initializeCamera();
   }
+  
+  @override
+  void initState() {
+    super.initState();
+
+    var options = FaceDetectorOptions(
+      enableLandmarks: false,
+      enableContours: true,
+      enableTracking: true,
+      enableClassification: true,
+      performanceMode: FaceDetectorMode.fast
+    );
+    
+    faceDetector = FaceDetector(options: options);
+    
+    recognizer = Recognizer();
+    
+    initializeCamera();
+  }
+
+  @override
+  void dispose() {
+    controller.dispose();
+    super.dispose();
+  }
+
 
   @override
   Widget build(BuildContext context) {
@@ -734,15 +713,7 @@ Future<img.Image?> readImageFromFile(String filePath) async {
     return SafeArea(
       child: Scaffold(
         backgroundColor: Colors.white,
-        body: isBlinkMode 
-        ? const Center(
-            child: SizedBox(
-              width: 80.0,
-              height: 80.0,
-              child: CircularProgressIndicator(),
-            ),
-          ) 
-        : Container(
+        body:  Container(
             margin: const EdgeInsets.only(top: 0.0),
             color: Colors.black,
             child: Stack(
@@ -773,15 +744,11 @@ Future<img.Image?> readImageFromFile(String filePath) async {
               ),
 
               Positioned(
-                top: size.height - 140,
-                left: 0,
+                left: 0.0,
+                bottom: 0.0,
                 width: size.width,
-                height: 100.0,
-                child: Card(
-                  margin: const EdgeInsets.only(
-                    left: 20.0, 
-                    right: 20.0
-                  ),
+                height: 180.0,
+                child: Container(
                   color: Colors.white,
                   child: Padding(
                     padding: const EdgeInsets.all(8.0),
@@ -789,47 +756,29 @@ Future<img.Image?> readImageFromFile(String filePath) async {
                       mainAxisAlignment: MainAxisAlignment.center,
                       crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        isBlinkGuide
-                        ? Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              const Text('Try blinking your eyes to indicate your presence',
-                                style: TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 14.0
-                                ),
-                              ),
-                              LottieBuilder.asset('assets/blink-eye.json',
-                                width: 50.0,
-                                height: 50.0,
-                              )
-                            ],
-                          ) 
-                        : Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              IconButton(
-                                icon: const Icon(
-                                  Icons.app_registration,
-                                  color: Colors.black,
-                                ),
-                                iconSize: 40.0,
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            IconButton(
+                              icon: const Icon(
+                                Icons.app_registration,
                                 color: Colors.black,
-                                onPressed: () {
-                                  setState(() {
-                                    register = true;
-                                  });
-                                },
-                              )
-                            ],
-                          ),
-                        ],
-                      ),
+                              ),
+                              iconSize: 40.0,
+                              color: Colors.black,
+                              onPressed: () {
+                                setState(() {
+                                  register = true;
+                                });
+                              },
+                            )
+                          ],
+                        ),
+                      ],
                     ),
                   ),
                 ),
-
-              // stackChildren
+              ),
 
             ] ,
           )
