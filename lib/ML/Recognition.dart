@@ -7,5 +7,4 @@ class Recognition {
   List<double> embeddings;
   double distance;
   Recognition(this.name, this.createdAt, this.location,this.embeddings,this.distance);
-
 }

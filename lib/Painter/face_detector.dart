@@ -10,8 +10,7 @@ class FaceDetectorPainter extends CustomPainter {
 
   final Size absoluteImageSize;
   final List<Recognition> faces;
-  
-  CameraLensDirection camDire2;
+  final CameraLensDirection camDire2;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -19,43 +18,38 @@ class FaceDetectorPainter extends CustomPainter {
     final double scaleY = size.height / absoluteImageSize.height;
 
     final Paint paint = Paint()
-    ..style = PaintingStyle.stroke
-    ..strokeWidth = 2.0
-    ..color = Colors.indigoAccent;
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.0
+      ..color = Colors.indigoAccent;
 
     for (Recognition face in faces) {
-      canvas.drawRect(
-        Rect.fromLTRB(
-          camDire2 == CameraLensDirection.front
-          ? (absoluteImageSize.width - face.location.right) * scaleX
-          : face.location.left * scaleX,
-          face.location.top * scaleY,
-          camDire2 == CameraLensDirection.front
-          ? (absoluteImageSize.width - face.location.left) * scaleX
-          : face.location.right * scaleX,
-          face.location.bottom * scaleY,
-        ),
-        paint,
+      // Calculate the center and radius for the rounded mask
+      double centerX = camDire2 == CameraLensDirection.front
+      ? (absoluteImageSize.width - (face.location.left + face.location.right) / 2) * scaleX
+      : ((face.location.left + face.location.right) / 2) * scaleX;
+
+      double centerY = ((face.location.top + face.location.bottom) / 2) * scaleY;
+
+      double radius = (face.location.width > face.location.height  ? face.location.height : face.location.width) *  scaleX / 2;
+
+      // Draw a circle for each detected face
+      canvas.drawCircle(Offset(centerX, centerY), radius, paint);
+
+      // Optionally draw text (e.g., recognition name)
+      TextSpan span = TextSpan(
+        style: const TextStyle(color: Colors.white, fontSize: 20),
+        text: face.name,
       );
 
-      TextSpan span = TextSpan(
-        style: const TextStyle(
-          color: Colors.white, 
-          fontSize: 20,
-        ),
-        text: face.name
-      );
-      
       TextPainter tp = TextPainter(
         text: span,
         textAlign: TextAlign.center,
-        textDirection: ui.TextDirection.rtl
+        textDirection: ui.TextDirection.rtl,
       );
 
       tp.layout();
-      tp.paint(canvas, Offset(face.location.left*scaleX, face.location.top*scaleY));
+      tp.paint(canvas, Offset(centerX - tp.width / 2, centerY - radius - 20));
     }
-
   }
 
   @override

@@ -1,4 +1,7 @@
+import 'package:face_recognition_realtime/login_page.dart';
 import 'package:face_recognition_realtime/register_page.dart';
+
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
 class AuthmenuPage extends StatefulWidget {
@@ -52,7 +55,9 @@ class AuthmenuPageState extends State<AuthmenuPage> {
 
                   ElevatedButton(
                     onPressed: () async {
-                      
+                      Navigator.push(context, MaterialPageRoute(builder: (context) {
+                        return const LoginPage();
+                      }));
                     },
                     style: ElevatedButton.styleFrom(
                       backgroundColor:const Color(0xffFE1717),
