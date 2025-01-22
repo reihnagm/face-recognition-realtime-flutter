@@ -63,7 +63,7 @@ class Recognizer {
       DatabaseHelper.columnIsLoggedIn: true.toString(),
       DatabaseHelper.columnCreatedAt: DateFormat('yyyy-MM-dd hh:mm').format(DateTime.now().toLocal()),
     };
-    
+
     await dbHelper.insert(row);
 
     loadRegisteredFaces();
