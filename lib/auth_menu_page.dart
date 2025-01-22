@@ -76,7 +76,9 @@ class AuthmenuPageState extends State<AuthmenuPage> {
                   ElevatedButton(
                     onPressed: () async {
                       Navigator.push(context, MaterialPageRoute(builder: (BuildContext context) {
-                        return const RegisterPage();
+                        return const RegisterPage(
+                          username: "Reihan Agam"
+                        );
                       }));
                     },
                     style: ElevatedButton.styleFrom(

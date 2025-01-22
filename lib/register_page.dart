@@ -2,10 +2,8 @@
 
 import 'dart:io';
 import 'dart:ui' as ui;
-import 'package:face_recognition_realtime/Painter/face_detector.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:image/image.dart' as img;
-
-// import 'package:dio/dio.dart';
 
 import 'package:face_recognition_realtime/main.dart';
 
@@ -24,7 +22,12 @@ import 'package:face_recognition_realtime/ML/Recognition.dart';
 import 'ML/Recognizer.dart';
 
 class RegisterPage extends StatefulWidget {
-  const RegisterPage({Key? key}) : super(key: key);
+  final String username;
+
+  const RegisterPage({
+    required this.username,
+    Key? key
+  }) : super(key: key);
 
   @override
   RegisterPageState createState() => RegisterPageState();
@@ -34,9 +37,14 @@ class RegisterPageState extends State<RegisterPage> {
   
   late CameraController controller;
 
+  String text1 = "Please scan your face to register";
+  String text2 = "";
+
   bool isBusy = false;
   bool btnRegister = false;
   bool register = false;
+  bool waitForScanSucceded = true;
+  bool alreadyRegistered = false;
 
   img.Image? image;
   
@@ -132,7 +140,15 @@ class RegisterPageState extends State<RegisterPage> {
 
     if (recognition.distance > 1.0) {
       recognition.name = "Not Registered";
-    } 
+      setState(() => text1 = "Not Registered");
+      setState(() => text2 = "Take your photo to register account");
+      setState(() => alreadyRegistered = false);
+      setState(() => waitForScanSucceded = false);
+    } else {
+      setState(() => text1 = "Already Registered ! AS ${recognition.name}");
+      setState(() => text2 = "");
+      setState(() => alreadyRegistered = true);
+    }
 
     return recognition;
   }
@@ -140,7 +156,7 @@ class RegisterPageState extends State<RegisterPage> {
   void showFaceRegistrationDialogue(img.Image croppedFace, Recognition recognition) {
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
+      builder: (BuildContext context) => AlertDialog(
       title: const Text("Face Registration",
         textAlign: TextAlign.center
       ),
@@ -170,17 +186,22 @@ class RegisterPageState extends State<RegisterPage> {
                     // save to local
                     s(() => btnRegister = true);
 
-                    await StorageHelper.saveImageToDownloads(image: croppedFace, filename: "UCUP");
+                    await StorageHelper.saveImageToDownloads(
+                      image: croppedFace, 
+                      filename: widget.username
+                    );
 
                     recognizer.registerFaceInDB(
-                      "UCUP", "UCUP", recognition.embeddings
+                      widget.username, 
+                      widget.username, 
+                      recognition.embeddings
                     );
 
                     Future.delayed(const Duration(seconds: 2), () async {
                       if(!mounted) return;
                         s(() => btnRegister = false);
                     });
-
+                  
                     if(!mounted) return;
                       Navigator.pop(context);
 
@@ -247,14 +268,16 @@ class RegisterPageState extends State<RegisterPage> {
       );
     }
 
-    final Size imageSize = Size(
-      controller.value.previewSize!.height,
-      controller.value.previewSize!.width,
-    );
+    // final Size imageSize = Size(
+    //   controller.value.previewSize!.height,
+    //   controller.value.previewSize!.width,
+    // );
     
-    CustomPainter painter = FaceDetectorPainter(imageSize, scanResults, camDirec);
+    // CustomPainter painter = FaceDetectorPainter(imageSize, scanResults, camDirec);
     
-    return CustomPaint(painter: painter);
+    // return CustomPaint(painter: painter);
+
+    return const SizedBox();
   }
 
   void toggleCameraDirection() async {
@@ -386,7 +409,17 @@ class RegisterPageState extends State<RegisterPage> {
 
     return SafeArea(
       child: Scaffold(
-        backgroundColor: Colors.white,
+        backgroundColor: Colors.black,
+        appBar: AppBar(
+          backgroundColor: Colors.transparent,
+          forceMaterialTransparency: true,
+          leading: CupertinoNavigationBarBackButton(
+            color: Colors.white,
+            onPressed: () {
+              Navigator.pop(context);
+            },
+          ),
+        ),
         body: Container(
           margin: const EdgeInsets.only(top: 0.0),
           color: Colors.black,
@@ -399,22 +432,80 @@ class RegisterPageState extends State<RegisterPage> {
                 left: 0.0,
                 width: size.width,
                 height: size.height,
-                child: Container(
-                  child: (controller.value.isInitialized)
-                  ? AspectRatio(
-                      aspectRatio: controller.value.aspectRatio,
-                      child: CameraPreview(controller),
-                    )
-                  : const SizedBox(),
-                ),
+                child: (controller.value.isInitialized)
+                ? Align(
+                    alignment: Alignment.topCenter,
+                    child: ClipOval(
+                      child: SizedBox(
+                        width: size.width * 0.8, 
+                        height: size.width * 0.8, 
+                        child: OverflowBox(
+                          alignment: Alignment.center,
+                          child: FittedBox(
+                            fit: BoxFit.cover,
+                            child: SizedBox(
+                              height: 1,
+                              child: AspectRatio(
+                                aspectRatio: 1 / controller.value.aspectRatio,
+                                child: CameraPreview(controller),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  )
+                : const SizedBox(),
               ),
 
+              // for scanning image
               Positioned(
                 top: 0.0,
                 left: 0.0,
                 width: size.width,
                 height: size.height,
-                child: buildResult()
+                child: Align(
+                  alignment: Alignment.topCenter,
+                  child: SizedBox(
+                    width: size.width * 0.8, 
+                    height: size.width * 0.8, 
+                    child: buildResult()
+                  )
+                ),
+              ),
+
+              Positioned(
+                top: MediaQuery.of(context).size.height * 0.5,
+                left: 0.0,
+                right: 0.0,
+                child: Center(
+                  child: Column(
+                    children: [
+                      Text(text1,
+                        style: const TextStyle(
+                          fontSize: 18.0,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white
+                        ),
+                      ),
+                      Text(text2,
+                        style: const TextStyle(
+                          fontSize: 16.0,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white
+                        ),
+                      )
+                    ],
+                  ) 
+                )
+              ), 
+
+              Positioned.fill(
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.5),
+                  ),
+                ),
               ),
 
               Positioned(
@@ -444,16 +535,33 @@ class RegisterPageState extends State<RegisterPage> {
                         Container(
                           padding: const EdgeInsets.all(1.0),
                           decoration: BoxDecoration(
-                            color: const Color(0xff211F1F).withOpacity(0.2),
+                            color: alreadyRegistered 
+                            ? Colors.grey.withOpacity(0.2)
+                            : waitForScanSucceded 
+                            ? Colors.grey.withOpacity(0.2) 
+                            : const Color(0xff211F1F).withOpacity(0.2),
                             shape: BoxShape.circle
                           ),
                           child: IconButton(
-                            highlightColor: const Color(0xff211F1F),
-                            icon: const Icon(
+                            highlightColor: alreadyRegistered 
+                            ? Colors.grey.withOpacity(0.2) 
+                            : waitForScanSucceded 
+                            ? Colors.grey.withOpacity(0.2) 
+                            :const Color(0xff211F1F),
+                            icon: Icon(
                               Icons.circle,
+                              color: alreadyRegistered 
+                            ? Colors.grey.withOpacity(0.2)
+                            : waitForScanSucceded 
+                            ? Colors.grey.withOpacity(0.2)
+                            : const Color(0xff211F1F),
                             ),
                             iconSize: 50.0,
-                            onPressed: () {
+                            onPressed: alreadyRegistered 
+                            ? () {} 
+                            : waitForScanSucceded 
+                            ? () {} 
+                            : () {
                               setState(() => register = true);
                             },
                           ),
